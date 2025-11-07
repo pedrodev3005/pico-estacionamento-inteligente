@@ -25,9 +25,9 @@ S2_ECHO = 15     # Vaga 2 - Echo
 LED_VAGA1_VERMELHO = 25
 LED_VAGA1_VERDE = 8
 LED_VAGA2_VERMELHO = 7
-LED_VAGA2_VERDE = 1  # Observação: GPIO 1 pode ser reservado em alguns modelos
+LED_VAGA2_VERDE = 1 
 
-# Polaridade (defina False se seu LED acende com nível baixo)
+# Polaridade
 LED_VAGA1_RED_ACTIVE_HIGH = True
 LED_VAGA1_GREEN_ACTIVE_HIGH = True
 LED_VAGA2_RED_ACTIVE_HIGH = True
@@ -63,7 +63,7 @@ class SensorSimulado:
     def cleanup(self):
         pass
 
-# Tenta importar a classe real do sensor (se estiver em um Raspberry Pi)
+# Tenta importar a classe real do sensor
 try:
     import RPi.GPIO as GPIO
     

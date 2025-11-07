@@ -31,6 +31,12 @@ DEBOUNCE_TIME = 0.05
 CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 !@#$%^&*()_+-=[]{}|;':\",./<>?"
 CHARSET_LEN = len(CHARSET)
 
+# --- Splash / Identidade do Projeto ---
+PROJECT_NAME = "Estacionamento Inteligente"
+PROJECT_AUTHORS = "Pedro Augusto & Nicholas"
+SPLASH_SECONDS = 2.5  # tempo que a tela fica visível
+
+
 # --- Estados do Programa ---
 class EstadoPrograma(Enum):
     CARROSSEL = auto()
@@ -201,6 +207,34 @@ def display_text(draw, font, text, x, y, wrap=False, max_width=DISPLAY_WIDTH):
         draw.text((x, y), text, font=font, fill=255)
 
 
+def draw_centered_text(draw, font, text, y, disp_width=DISPLAY_WIDTH):
+    """Desenha uma linha de texto centralizada no eixo X."""
+    bbox = font.getbbox(text)
+    w = bbox[2] - bbox[0]
+    x = max(0, (disp_width - w) // 2)
+    draw.text((x, y), text, font=font, fill=255)
+
+def show_splash(disp, image, draw, font):
+    """Exibe a tela de abertura com nome do projeto e autores."""
+    display_clear(draw, disp, image)
+    # título (maior). tenta uma fonte maior, caindo pra atual se faltar
+    try:
+        font_big = ImageFont.truetype(FONT_PATH, FONT_SIZE + 5)
+    except Exception:
+        font_big = font
+    # distribui as linhas verticalmente
+    y0 = 10
+    draw_centered_text(draw, font_big, PROJECT_NAME, y0)
+    draw_centered_text(draw, font, "by", y0 + 18)
+    draw_centered_text(draw, font, PROJECT_AUTHORS, y0 + 30)
+    display_show(disp, image)
+    time.sleep(SPLASH_SECONDS)
+    display_clear(draw, disp, image)
+    display_show(disp, image)
+
+
+
+
 def display_show(disp, image):
     """Envia o buffer para o display."""
     disp.image(image)
@@ -246,6 +280,9 @@ def main():
 
     disp, image, draw, font = setup_display()
     setup_gpio()
+
+    # Tela inicial do projeto (splash)
+    show_splash(disp, image, draw, font)
 
     # Estado inicial dos botões para debounce
     button_states = {
