@@ -7,6 +7,7 @@ import random
 import os
 import csv
 import argparse
+import queue  
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 
@@ -42,104 +43,75 @@ BUZZER_VAGA1 = 12
 BUZZER_VAGA2 = 13
 
 # Thresholds (ajuste conforme instalação)
-THRESHOLD_OCUPADA_CM = 40.0   # abaixo disso considera ocupada
-THRESHOLD_MUITO_PROXIMO_CM = 10.0  # abaixo disso emite bip
+THRESHOLD_OCUPADA_CM = 40.0     # abaixo disso considera ocupada
+THRESHOLD_MUITO_PROXIMO_CM = 10.0   # abaixo disso emite bip
 
-# Simulação do sensor HC-SR04
+# ==============================================================================
+# REMOVIDO: Conflito de Threads
+# A classe SensorHCSR04 e SensorSimulado ainda são usadas para 
+# inicializar o pino do LED de controle (LED_PIN 18) e o cleanup.
+# A thread de leitura `ler_sensor` foi removida pois conflitava
+# com o `loop_estacionamento` nos pinos 23/24 (Vaga 1).
+# ==============================================================================
+
+# Simulação do sensor (usado se GPIO falhar)
 class SensorSimulado:
-    def _init_(self):
-        self.valor_base = 20.0
-        self.direcao = 1
+    def __init__(self, trigger_pin=0, echo_pin=0):
+        # Esta classe agora é apenas um placeholder para o modo de simulação
+        # e para o método cleanup() funcionar.
+        print("GPIO não encontrado. SensorSimulado ativado.")
+        pass
         
     def medir_distancia(self):
-        # Simula uma leitura oscilante entre 10 e 30 cm
-        self.valor_base += 0.5 * self.direcao + random.uniform(-1, 1)
-        if self.valor_base > 30:
-            self.direcao = -1
-        elif self.valor_base < 10:
-            self.direcao = 1
-        return round(self.valor_base, 2)
-    
+        # Esta função não é mais chamada ativamente pela thread removida
+        return 99
+        
     def cleanup(self):
+        print("Modo de simulação: Cleanup chamado.")
         pass
 
 # Tenta importar a classe real do sensor
 try:
     import RPi.GPIO as GPIO
     
-    # Configuração do LED
+    # Configuração do LED de "Controle" (Pino 18)
     LED_PIN = 18  # Pino GPIO para o LED
     
     class SensorHCSR04:
-        def _init_(self, trigger_pin=23, echo_pin=24):
-            # Configuração do GPIO
-            self.PIN_TRIGGER = trigger_pin
-            self.PIN_ECHO = echo_pin
-            
-            # Use BCM pin numbering
+        def __init__(self, trigger_pin=23, echo_pin=24):
+            # Esta classe agora serve primariamente para configurar os pinos
+            # que ela conhece (incluindo o LED_PIN) e para o cleanup geral.
             GPIO.setmode(GPIO.BCM)
             GPIO.setwarnings(False)
             
-            # Configura os pinos
-            GPIO.setup(self.PIN_TRIGGER, GPIO.OUT)
-            GPIO.setup(self.PIN_ECHO, GPIO.IN)
+            # Configura o pino do LED de Controle
+            try:
+                GPIO.setup(LED_PIN, GPIO.OUT)
+                GPIO.output(LED_PIN, GPIO.LOW)  # Inicia desligado
+            except Exception as e:
+                print(f"Aviso: falha ao configurar LED_PIN {LED_PIN}: {e}")
             
-            # Configura o pino do LED
-            GPIO.setup(LED_PIN, GPIO.OUT)
-            GPIO.output(LED_PIN, GPIO.LOW)  # Inicia desligado
-            
-            # Inicializa com valor baixo
-            GPIO.output(self.PIN_TRIGGER, GPIO.LOW)
-            time.sleep(0.1)  # Pequena pausa para estabilizar
+            # A configuração dos pinos do sensor (trigger/echo)
+            # é feita pelo bloco de inicialização de estacionamento agora.
+            pass
             
         def medir_distancia(self):
-            # Garante que o Trigger começa em nível baixo
-            GPIO.output(self.PIN_TRIGGER, GPIO.LOW)
-            time.sleep(0.05)  # Pequena pausa
-            
-            # Envia o pulso de trigger (10 microssegundos)
-            GPIO.output(self.PIN_TRIGGER, GPIO.HIGH)
-            time.sleep(0.00001)  # 10 us
-            GPIO.output(self.PIN_TRIGGER, GPIO.LOW)
-            
-            pulse_start_time = time.time()
-            pulse_end_time = time.time()
-            timeout_start = time.time()
-            
-            # Guarda o tempo de início do pulso de echo
-            while GPIO.input(self.PIN_ECHO) == 0:
-                pulse_start_time = time.time()
-                # Adiciona timeout para evitar loop infinito
-                if time.time() - timeout_start > 0.1:  # Timeout de 100ms
-                    return None  # Retorna None em caso de erro
-            
-            timeout_start = time.time()  # Reseta timeout
-            
-            # Guarda o tempo de fim do pulso de echo
-            while GPIO.input(self.PIN_ECHO) == 1:
-                pulse_end_time = time.time()
-                # Adiciona timeout para evitar loop infinito
-                if time.time() - timeout_start > 0.1:  # Timeout de 100ms
-                    return None  # Retorna None em caso de erro
-            
-            # Calcula a duração do pulso
-            pulse_duration = pulse_end_time - pulse_start_time
-            
-            # Calcula a distância (velocidade do som ~34300 cm/s)
-            # Distância = (Tempo * Velocidade) / 2
-            distance = (pulse_duration * 34300) / 2
-            
-            return round(distance, 2)
+            # Esta função não é mais chamada ativamente,
+            # foi mantida para não quebrar a estrutura da classe.
+            print("Aviso: medir_distancia() da classe SensorHCSR04 não deve ser chamada.")
+            return None
         
         def cleanup(self):
+            print("Limpando pinos GPIO...")
             GPIO.cleanup()
     
+    # Instancia o objeto para inicializar o LED_PIN e permitir o cleanup
     sensor = SensorHCSR04()
-    print("Sensor HC-SR04 inicializado com sucesso!")
+    print("Sensor HC-SR04 (Helper) inicializado com sucesso!")
     
 except (ImportError, RuntimeError):
     print("Executando em modo de simulação (sem GPIO)")
-    sensor = SensorSimulado()
+    sensor = SensorSimulado() # Objeto placeholder para cleanup
 
 # Inicialização dos pinos para estacionamento quando em Raspberry Pi
 try:
@@ -148,9 +120,9 @@ try:
     _GPIO_check.setmode(_GPIO_check.BCM)
     _GPIO_check.setwarnings(False)
     # Sensores
-    _GPIO_check.setup(S1_TRIGGER, _GPIO_check.OUT)
+    _GPIO_check.setup(S1_TRIGGER, _GPIO_check.OUT, initial=_GPIO_check.LOW)
     _GPIO_check.setup(S1_ECHO, _GPIO_check.IN)
-    _GPIO_check.setup(S2_TRIGGER, _GPIO_check.OUT)
+    _GPIO_check.setup(S2_TRIGGER, _GPIO_check.OUT, initial=_GPIO_check.LOW)
     _GPIO_check.setup(S2_ECHO, _GPIO_check.IN)
     # Atuadores
     for pin in [LED_VAGA1_VERMELHO, LED_VAGA1_VERDE, LED_VAGA2_VERMELHO, LED_VAGA2_VERDE,
@@ -164,9 +136,9 @@ except Exception:
     pass
 
 # Variáveis globais
-leituras_historico = []
-MAX_HISTORICO = 20  # Reduzido para economizar memória
-intervalo_leitura = 2.0  # Aumentado para reduzir carga no sistema
+# REMOVIDO: leituras_historico (não é mais populado)
+# REMOVIDO: MAX_HISTORICO
+# REMOVIDO: intervalo_leitura
 
 # Cache de estado das vagas para servir via API sem depender da página aberta
 estado_vagas_cache = {
@@ -189,7 +161,7 @@ estado_vagas_cache = {
     }
 }
 cache_vagas_lock = threading.Lock()
-intervalo_estacionamento = 1.5
+intervalo_estacionamento = 1.0  # <--- OTIMIZAÇÃO: Reduzido de 1.5s para 1.0s
 
 # Estado de simulação para duas vagas
 sim_vaga1 = {'valor_base': 35.0, 'direcao': -1}
@@ -197,12 +169,17 @@ sim_vaga2 = {'valor_base': 25.0, 'direcao': 1}
 
 # Configuração para armazenamento em CSV
 DIRETORIO_DADOS = "dados_sensor"
-ARQUIVO_LEITURAS = os.path.join(DIRETORIO_DADOS, "leituras_sensor.csv")
+# REMOVIDO: ARQUIVO_LEITURAS (não é mais usado)
 ARQUIVO_ACOES_LED = os.path.join(DIRETORIO_DADOS, "acoes_led.csv")
 ARQUIVO_EVENTOS = os.path.join(DIRETORIO_DADOS, "historico_completo.csv")
 ARQUIVO_VAGA1 = os.path.join(DIRETORIO_DADOS, "leituras_vaga1.csv")
 ARQUIVO_VAGA2 = os.path.join(DIRETORIO_DADOS, "leituras_vaga2.csv")
 ARQUIVO_UNIFICADO = os.path.join(DIRETORIO_DADOS, "historico_unificado.csv")
+
+# ==========================================================
+#         NOVO: Fila de Logging Assíncrono
+# ==========================================================
+log_queue = queue.Queue()
 
 # Criar diretório de dados se não existir
 if not os.path.exists(DIRETORIO_DADOS):
@@ -210,11 +187,7 @@ if not os.path.exists(DIRETORIO_DADOS):
 
 # Inicializar arquivos CSV se não existirem
 def inicializar_arquivos_csv():
-    # Arquivo de leituras do sensor
-    if not os.path.exists(ARQUIVO_LEITURAS):
-        with open(ARQUIVO_LEITURAS, 'w', newline='') as arquivo:
-            escritor = csv.writer(arquivo)
-            escritor.writerow(['timestamp', 'distancia_cm'])
+    # Arquivo de leituras do sensor (REMOVIDO)
     
     # Arquivo de ações do LED
     if not os.path.exists(ARQUIVO_ACOES_LED):
@@ -242,84 +215,89 @@ def inicializar_arquivos_csv():
             escritor = csv.writer(arquivo)
             escritor.writerow(['timestamp', 'distancia_cm', 'estado', 'muito_proximo'])
 
-# Função para registrar leitura do sensor
-def registrar_leitura(distancia, timestamp):
-    # Registra no arquivo específico de leituras
-    with open(ARQUIVO_LEITURAS, 'a', newline='') as arquivo:
-        escritor = csv.writer(arquivo)
-        escritor.writerow([timestamp, distancia])
-    
-    # Registra no arquivo combinado de eventos
-    with open(ARQUIVO_EVENTOS, 'a', newline='') as arquivo:
-        escritor = csv.writer(arquivo)
-        escritor.writerow([timestamp, 'sensor', 'distancia_cm', distancia])
-    # Unificado
-    try:
-        with open(ARQUIVO_UNIFICADO, 'a', newline='') as arquivo:
-            escritor = csv.writer(arquivo)
-            escritor.writerow([timestamp, 'leitura', 'sensor', distancia, '', '', '', ''])
-    except Exception as e:
-        print(f"Erro ao registrar no unificado (sensor): {e}")
+# Função para registrar leitura do sensor (REMOVIDA)
 
-# Função para registrar ação do LED
+# ==========================================================
+#         OTIMIZAÇÃO: Funções de log agora usam a fila
+# ==========================================================
+
+# Função para registrar ação do LED (agora coloca na fila)
 def registrar_acao_led(estado, timestamp=None):
     if timestamp is None:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Registra no arquivo específico de ações do LED
-    with open(ARQUIVO_ACOES_LED, 'a', newline='') as arquivo:
-        escritor = csv.writer(arquivo)
-        escritor.writerow([timestamp, 'alteracao', 'ligado' if estado else 'desligado'])
-    
-    # Registra no arquivo combinado de eventos
-    with open(ARQUIVO_EVENTOS, 'a', newline='') as arquivo:
-        escritor = csv.writer(arquivo)
-        escritor.writerow([timestamp, 'led', 'estado', 'ligado' if estado else 'desligado'])
-    # Unificado
-    try:
-        with open(ARQUIVO_UNIFICADO, 'a', newline='') as arquivo:
-            escritor = csv.writer(arquivo)
-            escritor.writerow([timestamp, 'acao', 'led', '', '', '', 'toggle', 'ligado' if estado else 'desligado'])
-    except Exception as e:
-        print(f"Erro ao registrar no unificado (led): {e}")
+    # Coloca a informação na fila ao invés de escrever diretamente
+    log_queue.put(('led', timestamp, estado))
 
-# Registra leitura de uma vaga em CSV e no histórico consolidado
+# Registra leitura de uma vaga (agora coloca na fila)
 def registrar_leitura_vaga(vaga_id, distancia, estado, muito_proximo, timestamp=None):
     if timestamp is None:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     linha = [timestamp, distancia if distancia is not None else '', estado, 'sim' if muito_proximo else 'nao']
-    try:
-        if vaga_id == 1:
-            with open(ARQUIVO_VAGA1, 'a', newline='') as arquivo:
-                csv.writer(arquivo).writerow(linha)
-        else:
-            with open(ARQUIVO_VAGA2, 'a', newline='') as arquivo:
-                csv.writer(arquivo).writerow(linha)
-    except Exception as e:
-        print(f"Erro ao registrar CSV da vaga {vaga_id}: {e}")
-    # Também registra no consolidado
-    try:
-        with open(ARQUIVO_EVENTOS, 'a', newline='') as arquivo:
-            escritor = csv.writer(arquivo)
-            escritor.writerow([timestamp, f'vaga{vaga_id}', 'distancia_cm', distancia if distancia is not None else ''])
-    except Exception as e:
-        print(f"Erro ao registrar eventos da vaga {vaga_id}: {e}")
-    # Também registra no unificado
-    try:
-        with open(ARQUIVO_UNIFICADO, 'a', newline='') as arquivo:
-            escritor = csv.writer(arquivo)
-            escritor.writerow([
-                timestamp,
-                'leitura',
-                f'vaga{vaga_id}',
-                distancia if distancia is not None else '',
-                estado,
-                'sim' if muito_proximo else 'nao',
-                '',
-                ''
-            ])
-    except Exception as e:
-        print(f"Erro ao registrar no unificado da vaga {vaga_id}: {e}")
+    
+    # Coloca todas as informações necessárias para o log na fila
+    log_queue.put(('vaga', vaga_id, linha, timestamp, distancia, estado, muito_proximo))
+
+
+# ==========================================================
+#         NOVO: Thread de Escrita de Log
+# ==========================================================
+def log_writer():
+    """
+    Esta função roda em uma thread separada.
+    Ela fica monitorando a `log_queue` e escreve no disco 
+    sem travar o loop principal dos sensores.
+    """
+    print("Thread de logging iniciada.")
+    while True:
+        try:
+            # Pega item da fila (bloqueia até um item aparecer)
+            item = log_queue.get()
+            
+            # Log de Ação do LED
+            if item[0] == 'led':
+                _, timestamp, estado = item
+                # Registra no arquivo específico de ações do LED
+                with open(ARQUIVO_ACOES_LED, 'a', newline='') as arquivo:
+                    csv.writer(arquivo).writerow([timestamp, 'alteracao', 'ligado' if estado else 'desligado'])
+                # Registra no arquivo combinado de eventos
+                with open(ARQUIVO_EVENTOS, 'a', newline='') as arquivo:
+                    csv.writer(arquivo).writerow([timestamp, 'led', 'estado', 'ligado' if estado else 'desligado'])
+                # Unificado
+                with open(ARQUIVO_UNIFICADO, 'a', newline='') as arquivo:
+                    csv.writer(arquivo).writerow([timestamp, 'acao', 'led', '', '', '', 'toggle', 'ligado' if estado else 'desligado'])
+
+            # Log de Leitura de Vaga
+            elif item[0] == 'vaga':
+                _, vaga_id, linha, timestamp, distancia, estado, muito_proximo = item
+                
+                # Registra no arquivo específico da vaga
+                arquivo_vaga = ARQUIVO_VAGA1 if vaga_id == 1 else ARQUIVO_VAGA2
+                with open(arquivo_vaga, 'a', newline='') as arquivo:
+                    csv.writer(arquivo).writerow(linha)
+                
+                # Registra no consolidado de eventos
+                with open(ARQUIVO_EVENTOS, 'a', newline='') as arquivo:
+                    csv.writer(arquivo).writerow([timestamp, f'vaga{vaga_id}', 'distancia_cm', distancia if distancia is not None else ''])
+                
+                # Registra no unificado
+                with open(ARQUIVO_UNIFICADO, 'a', newline='') as arquivo:
+                    escritor = csv.writer(arquivo)
+                    escritor.writerow([
+                        timestamp, 'leitura', f'vaga{vaga_id}',
+                        distancia if distancia is not None else '',
+                        estado, 'sim' if muito_proximo else 'nao',
+                        '', ''
+                    ])
+            
+            # Marca a tarefa como concluída na fila
+            log_queue.task_done()
+
+        except Exception as e:
+            print(f"Erro na thread de logging: {e}")
+            # Em caso de erro, tenta continuar
+            log_queue.task_done()
+
 
 # ====================== Funções de estacionamento ====================== #
 def medir_distancia_parking(trigger_pin, echo_pin):
@@ -351,7 +329,7 @@ def medir_distancia_parking(trigger_pin, echo_pin):
 
     # Com GPIO real
     GPIO.output(trigger_pin, GPIO.LOW)
-    time.sleep(0.2)
+    time.sleep(0.02)  # <--- OTIMIZAÇÃO: Reduzido de 0.2s para 0.02s
     GPIO.output(trigger_pin, GPIO.HIGH)
     time.sleep(0.00001)
     GPIO.output(trigger_pin, GPIO.LOW)
@@ -435,7 +413,8 @@ def loop_estacionamento():
             prox2 = (d2 is not None) and (d2 < THRESHOLD_MUITO_PROXIMO_CM)
 
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            # Registra CSV por vaga
+            
+            # OTIMIZAÇÃO: Esta função agora é assíncrona (muito rápida)
             registrar_leitura_vaga(1, d1, estado1, prox1, ts)
             registrar_leitura_vaga(2, d2, estado2, prox2, ts)
 
@@ -463,7 +442,13 @@ def loop_estacionamento():
         finally:
             time.sleep(intervalo_estacionamento)
 
-# HTML da página principal - Versão simplificada
+# ==========================================================
+# ============ TEMPLATE HTML ATUALIZADO ====================
+# ==========================================================
+# (O HTML foi atualizado para remover o "Controle do LED"
+# que estava ligado à thread conflitante, e o intervalo
+# de atualização do JS foi reduzido para 1000ms)
+# ==========================================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -517,20 +502,45 @@ HTML_TEMPLATE = """
             text-align: center;
             margin-bottom: 15px;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
+        /* Estilo para os cards das vagas */
+        .cards-container {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap; /* Permite quebrar a linha em telas menores */
         }
-        th, td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
+        .card-vaga {
+            flex: 1; 
+            min-width: 280px; /* Largura mínima para cada card */
+            padding: 12px; 
+            border: 1px solid #ddd; 
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
-        th {
-            background-color: #f2f2f2;
+        .card-vaga h3 {
+            margin: 0 0 8px 0; 
             color: #333;
         }
+        /* Estilo para a nova seção de resumo */
+        .resumo-container {
+            display: flex;
+            gap: 16px;
+            justify-content: space-around; /* Espaça os gráficos */
+            flex-wrap: wrap;
+        }
+        .resumo-vaga {
+            flex: 1;
+            min-width: 250px;
+            max-width: 300px; /* Limita o tamanho do gráfico de rosca */
+            padding: 10px;
+            text-align: center;
+        }
+        .resumo-vaga h3 {
+            margin: 0 0 10px 0;
+            color: #555;
+            font-size: 1.1em;
+        }
+
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
@@ -539,9 +549,9 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>Estacionamento Inteligente</h1>
 
-        <div class="historico" style="margin-top: 10px;">
-            <h2>Controle do LED</h2>
-            <div style="display:flex; gap:12px; align-items:center; justify-content:center;">
+        <div class="historico" style="margin-top: 10px; border-top: none; padding-top: 0;">
+            <h2>Controle do LED (Pino 18)</h2>
+            <div style="display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap: wrap;">
                 <div>Estado do LED: <span id="led-estado">--</span></div>
                 <button id="led-toggle" style="background:#ff9800;color:#fff;padding:6px 10px;border:none;border-radius:4px;cursor:pointer;">Ligar LED</button>
                 <a href="/download/led" style="background:#795548;color:#fff;padding:6px 10px;border-radius:4px;text-decoration:none;font-size:12px;">Baixar CSV LED</a>
@@ -552,41 +562,67 @@ HTML_TEMPLATE = """
         <div id="alerta-proximidade" class="alerta">Alerta: veículo muito próximo em uma das vagas!</div>
 
         <div class="historico">
-            <h2>Estacionamento (2 vagas)</h2>
-            <div id="parking-status" style="display:flex; gap:12px; justify-content:center;">
-                <div style="flex:1; padding:12px; border:1px solid #ddd; border-radius:6px;">
-                    <h3 style="margin:0 0 8px 0; color:#333;">Vaga 1</h3>
+            <h2>Monitoramento das Vagas</h2>
+            <div id="parking-status" class="cards-container">
+                <div class="card-vaga">
+                    <h3>Vaga 1</h3>
                     <div>Distância: <span id="vaga1-dist">--</span> cm</div>
                     <div>Estado: <span id="vaga1-estado">--</span></div>
                     <div>Muito próximo: <span id="vaga1-prox">--</span></div>
                     <div>LED vermelho: <span id="vaga1-led-v">--</span></div>
                     <div>LED verde: <span id="vaga1-led-g">--</span></div>
                     <div>Buzzer: <span id="vaga1-buzzer">--</span></div>
-                    <canvas id="chart-vaga1" width="300" height="120" style="margin-top:8px;border-radius:4px;background:#000;"></canvas>
+                    
+                    <div style="position: relative; height: 150px; margin-top: 10px;">
+                        <canvas id="chart-vaga1"></canvas>
+                    </div>
+                    
                     <div style="margin-top:8px; text-align:right;">
                         <a href="/download/leituras_vaga1.csv" style="background:#2196F3;color:#fff;padding:6px 10px;border-radius:4px;text-decoration:none;font-size:12px;">Baixar CSV Vaga 1</a>
                     </div>
                 </div>
-                <div style="flex:1; padding:12px; border:1px solid #ddd; border-radius:6px;">
-                    <h3 style="margin:0 0 8px 0; color:#333;">Vaga 2</h3>
+                <div class="card-vaga">
+                    <h3>Vaga 2</h3>
                     <div>Distância: <span id="vaga2-dist">--</span> cm</div>
                     <div>Estado: <span id="vaga2-estado">--</span></div>
                     <div>Muito próximo: <span id="vaga2-prox">--</span></div>
                     <div>LED vermelho: <span id="vaga2-led-v">--</span></div>
                     <div>LED verde: <span id="vaga2-led-g">--</span></div>
                     <div>Buzzer: <span id="vaga2-buzzer">--</span></div>
-                    <canvas id="chart-vaga2" width="300" height="120" style="margin-top:8px;border-radius:4px;background:#000;"></canvas>
+                    
+                    <div style="position: relative; height: 150px; margin-top: 10px;">
+                        <canvas id="chart-vaga2"></canvas>
+                    </div>
+
                     <div style="margin-top:8px; text-align:right;">
                         <a href="/download/leituras_vaga2.csv" style="background:#4CAF50;color:#fff;padding:6px 10px;border-radius:4px;text-decoration:none;font-size:12px;">Baixar CSV Vaga 2</a>
                     </div>
                 </div>
             </div>
         </div>
+
+        <div class="historico">
+            <h2>Resumo da Ocupação (Sessão Atual)</h2>
+            <div class="resumo-container">
+                <div class="resumo-vaga">
+                    <h3>Vaga 1</h3>
+                    <div style="position: relative; height: 200px;">
+                        <canvas id="chart-resumo-vaga1"></canvas>
+                    </div>
+                </div>
+                <div class="resumo-vaga">
+                    <h3>Vaga 2</h3>
+                    <div style="position: relative; height: 200px;">
+                        <canvas id="chart-resumo-vaga2"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         
         <footer>
             Sistema de Monitoramento do Sensor HC-SR04 - Raspberry Pi 3B (Versão Lite)
         </footer>
-        
         
     </div>
 
@@ -607,24 +643,37 @@ HTML_TEMPLATE = """
         const v2LedV = document.getElementById('vaga2-led-v');
         const v2LedG = document.getElementById('vaga2-led-g');
         const v2Buzzer = document.getElementById('vaga2-buzzer');
-        const ledEstado = document.getElementById('led-estado');
-        const ledToggle = document.getElementById('led-toggle');
+        const ledEstado = document.getElementById('led-estado'); // <--- MANTIDO
+        const ledToggle = document.getElementById('led-toggle'); // <--- MANTIDO
+
+        // --- Variáveis dos Gráficos de Linha ---
         const dadosVaga1 = [];
         const dadosVaga2 = [];
-        let startTime = Date.now();
         const MAX_PONTOS = 40;
         let chart1 = null;
         let chart2 = null;
+
+        // --- Variáveis dos Gráficos de Resumo (Rosca) ---
+        let chartResumo1 = null;
+        let chartResumo2 = null;
+        let contagemVaga1 = { ocupada: 0, livre: 0, falha: 0 };
+        let contagemVaga2 = { ocupada: 0, livre: 0, falha: 0 };
+        const canvasResumo1 = document.getElementById('chart-resumo-vaga1');
+        const canvasResumo2 = document.getElementById('chart-resumo-vaga2');
+
 
         // Inicializa a página
         window.addEventListener('load', function() {
             atualizarEstacionamento();
             inicializarGraficos();
-            atualizarLedStatus();
+            inicializarGraficosResumo(); 
+            atualizarLedStatus(); // <--- MANTIDO
 
-            // Atualiza periodicamente apenas o estacionamento
-            setInterval(atualizarEstacionamento, 1500);
-            setInterval(atualizarLedStatus, 2000);
+            // OTIMIZAÇÃO: Intervalo reduzido para 1000ms (1 segundo)
+            setInterval(atualizarEstacionamento, 1000); 
+            setInterval(atualizarLedStatus, 2000); // <--- MANTIDO (pode ser mais lento)
+            
+            // <--- MANTIDO
             ledToggle.addEventListener('click', function() {
                 const ligar = ledToggle.textContent.includes('Ligar');
                 fetch('/api/led?estado=' + (ligar ? 1 : 0))
@@ -639,19 +688,23 @@ HTML_TEMPLATE = """
             fetch('/api/parking/status')
                 .then(response => response.json())
                 .then(data => {
+                    // --- Atualiza Textos Vaga 1 ---
                     vaga1Dist.textContent = data.vaga1.distancia !== null ? data.vaga1.distancia.toFixed(2) : '--';
                     vaga1Estado.textContent = data.vaga1.estado;
                     vaga1Prox.textContent = data.vaga1.muito_proximo ? 'Sim' : 'Não';
                     v1LedV.textContent = data.vaga1.led_vermelho ? 'Ligado' : 'Desligado';
                     v1LedG.textContent = data.vaga1.led_verde ? 'Ligado' : 'Desligado';
                     v1Buzzer.textContent = data.vaga1.buzzer ? 'Ligado' : 'Desligado';
+                    
+                    // --- Atualiza Textos Vaga 2 ---
                     vaga2Dist.textContent = data.vaga2.distancia !== null ? data.vaga2.distancia.toFixed(2) : '--';
                     vaga2Estado.textContent = data.vaga2.estado;
                     vaga2Prox.textContent = data.vaga2.muito_proximo ? 'Sim' : 'Não';
                     v2LedV.textContent = data.vaga2.led_vermelho ? 'Ligado' : 'Desligado';
                     v2LedG.textContent = data.vaga2.led_verde ? 'Ligado' : 'Desligado';
                     v2Buzzer.textContent = data.vaga2.buzzer ? 'Ligado' : 'Desligado';
-                    // Exibe alerta indicando quais vagas estão muito próximas
+
+                    // --- Atualiza Alerta ---
                     const vagasProximas = [];
                     if (data.vaga1.muito_proximo) vagasProximas.push('Vaga 1');
                     if (data.vaga2.muito_proximo) vagasProximas.push('Vaga 2');
@@ -662,7 +715,7 @@ HTML_TEMPLATE = """
                         alerta.style.display = 'none';
                     }
 
-                    // Atualiza gráficos Chart.js em linha com eixo de tempo
+                    // --- Atualiza Gráficos de Linha ---
                     const t = new Date();
                     if (typeof data.vaga1.distancia === 'number') {
                         dadosVaga1.push({ x: t, y: data.vaga1.distancia });
@@ -676,89 +729,184 @@ HTML_TEMPLATE = """
                         chart2.data.datasets[0].data = dadosVaga2.slice();
                         chart2.update('none');
                     }
+
+                    // --- ATUALIZAÇÃO DOS GRÁFICOS DE RESUMO ---
+                    const estado1 = data.vaga1.estado;
+                    const estado2 = data.vaga2.estado;
+
+                    if (estado1 === 'ocupada') contagemVaga1.ocupada++;
+                    else if (estado1 === 'livre') contagemVaga1.livre++;
+                    else contagemVaga1.falha++;
+                    
+                    if (estado2 === 'ocupada') contagemVaga2.ocupada++;
+                    else if (estado2 === 'livre') contagemVaga2.livre++;
+                    else contagemVaga2.falha++;
+
+                    if(chartResumo1) {
+                        chartResumo1.data.datasets[0].data = [contagemVaga1.ocupada, contagemVaga1.livre];
+                        chartResumo1.update('none'); 
+                    }
+                    if(chartResumo2) {
+                        chartResumo2.data.datasets[0].data = [contagemVaga2.ocupada, contagemVaga2.livre];
+                        chartResumo2.update('none');
+                    }
+
                 })
                 .catch(err => {
                     console.error('Erro ao obter status de estacionamento:', err);
                 });
         }
 
+        // --- Função dos Gráficos de Linha (sem alteração) ---
         function inicializarGraficos() {
-            chart1 = new Chart(chartVaga1.getContext('2d'), {
+            const ctx1 = chartVaga1.getContext('2d');
+            const gradient1 = ctx1.createLinearGradient(0, 0, 0, 150);
+            gradient1.addColorStop(0, 'rgba(244, 67, 54, 0.5)'); 
+            gradient1.addColorStop(1, 'rgba(244, 67, 54, 0)');
+
+            chart1 = new Chart(ctx1, {
                 type: 'line',
                 data: {
                     datasets: [{
-                        label: 'ultrassom variação tempo X mm',
+                        label: 'Distância (cm)',
                         data: [],
                         borderColor: '#F44336',
-                        borderWidth: 2.5,
+                        borderWidth: 2,
                         pointRadius: 0,
-                        tension: 0.2,
-                        fill: false,
+                        tension: 0.3, 
+                        fill: true,
+                        backgroundColor: gradient1,
                     }]
                 },
                 options: {
-                    responsive: false,
-                    plugins: {
-                        legend: { display: false, labels: { color: '#ddd' } },
-                        title: { display: true, text: 'ultrassom variação tempo X mm', color: '#ddd' },
-                        tooltip: { enabled: true }
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, title: { display: false }, 
+                        tooltip: { enabled: true, mode: 'index', intersect: false, }
                     },
                     scales: {
                         x: {
                             type: 'time',
                             time: { unit: 'second', displayFormats: { second: 'HH:mm:ss' } },
-                            title: { display: true, text: 'Tempo', color: '#ddd' },
+                            title: { display: false },
                             grid: { display: false },
-                            ticks: { color: '#ddd', maxRotation: 45, minRotation: 30 }
+                            ticks: { color: '#666', maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }
                         },
                         y: {
-                            title: { display: true, text: 'cm', color: '#ddd' },
-                            grid: { display: true, color: '#aaa', lineWidth: 1.2 },
-                            ticks: { color: '#ddd' },
-                            beginAtZero: true
+                            title: { display: true, text: 'cm', color: '#666' },
+                            grid: { display: true, color: '#eeeeee', lineWidth: 1 },
+                            ticks: { color: '#666' },
+                            beginAtZero: true,
+                            suggestedMax: 70 
                         }
-                    }
+                    },
+                    animation: { duration: 200 }
                 }
             });
-            chart2 = new Chart(chartVaga2.getContext('2d'), {
+
+            const ctx2 = chartVaga2.getContext('2d');
+            const gradient2 = ctx2.createLinearGradient(0, 0, 0, 150);
+            gradient2.addColorStop(0, 'rgba(33, 150, 243, 0.5)');
+            gradient2.addColorStop(1, 'rgba(33, 150, 243, 0)');
+
+            chart2 = new Chart(ctx2, {
                 type: 'line',
                 data: {
                     datasets: [{
-                        label: 'ultrassom variação tempo X mm',
+                        label: 'Distância (cm)',
                         data: [],
                         borderColor: '#2196F3',
-                        borderWidth: 2.5,
+                        borderWidth: 2,
                         pointRadius: 0,
-                        tension: 0.2,
-                        fill: false,
+                        tension: 0.3,
+                        fill: true,
+                        backgroundColor: gradient2,
                     }]
                 },
                 options: {
-                    responsive: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: false, labels: { color: '#ddd' } },
-                        title: { display: true, text: 'ultrassom variação tempo X mm', color: '#ddd' },
-                        tooltip: { enabled: true }
+                        legend: { display: false }, title: { display: false },
+                        tooltip: { enabled: true, mode: 'index', intersect: false, }
                     },
                     scales: {
                         x: {
                             type: 'time',
                             time: { unit: 'second', displayFormats: { second: 'HH:mm:ss' } },
-                            title: { display: true, text: 'Tempo', color: '#ddd' },
+                            title: { display: false },
                             grid: { display: false },
-                            ticks: { color: '#ddd', maxRotation: 45, minRotation: 30 }
+                            ticks: { color: '#666', maxRotation: 0, autoSkip: true, maxTicksLimit: 6 }
                         },
                         y: {
-                            title: { display: true, text: 'cm', color: '#ddd' },
-                            grid: { display: true, color: '#aaa', lineWidth: 1.2 },
-                            ticks: { color: '#ddd' },
-                            beginAtZero: true
+                            title: { display: true, text: 'cm', color: '#666' },
+                            grid: { display: true, color: '#eeeeee', lineWidth: 1 },
+                            ticks: { color: '#666' },
+                            beginAtZero: true,
+                            suggestedMax: 70
                         }
-                    }
+                    },
+                    animation: { duration: 200 }
                 }
             });
         }
 
+        // --- Função dos Gráficos de Resumo (sem alteração) ---
+        function inicializarGraficosResumo() {
+            const optionsResumo = {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '60%', 
+                plugins: {
+                    legend: {
+                        position: 'bottom', 
+                        labels: { color: '#333', boxWidth: 12, padding: 15 }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                let value = context.raw;
+                                let total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                let percentage = total > 0 ? (value / total * 100).toFixed(1) + '%' : '0%';
+                                return ` ${label}: ${value} (${percentage})`;
+                            }
+                        }
+                    }
+                }
+            };
+
+            chartResumo1 = new Chart(canvasResumo1.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Ocupada', 'Livre'],
+                    datasets: [{
+                        data: [0, 0],
+                        backgroundColor: ['#F44336', '#8BC34A'],
+                        borderColor: '#ffffff',
+                        borderWidth: 2
+                    }]
+                },
+                options: optionsResumo
+            });
+
+            chartResumo2 = new Chart(canvasResumo2.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Ocupada', 'Livre'],
+                    datasets: [{
+                        data: [0, 0],
+                        backgroundColor: ['#F44336', '#8BC34A'],
+                        borderColor: '#ffffff',
+                        borderWidth: 2
+                    }]
+                },
+                options: optionsResumo
+            });
+        }
+
+
+        // --- Função do LED (MANTIDA) ---
         function atualizarLedStatus() {
             fetch('/api/led/status')
                 .then(r => r.json())
@@ -787,34 +935,10 @@ class SensorHTTPHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(HTML_TEMPLATE.encode())
             return
         
-        elif path == '/api/leitura':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            
-            # Obter leitura atual
-            distancia = sensor.medir_distancia()
-            timestamp = datetime.now().strftime('%H:%M:%S')
-            
-            # Adicionar ao histórico
-            leitura = {'valor': distancia, 'timestamp': timestamp}
-            leituras_historico.append(leitura)
-            
-            # Limitar tamanho do histórico
-            if len(leituras_historico) > MAX_HISTORICO:
-                leituras_historico.pop(0)
-            
-            self.wfile.write(json.dumps(leitura).encode())
-            return
-        
-        elif path == '/api/historico':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            
-            # Retorna as últimas leituras (já estão em memória)
-            self.wfile.write(json.dumps(leituras_historico).encode())
-            return
+        # ==========================================================
+        #     REMOVIDO: Endpoints /api/leitura e /api/historico
+        #     (Pois a thread que os populava foi removida)
+        # ==========================================================
         
         elif path == '/api/historico/led':
             self.send_response(200)
@@ -876,45 +1000,11 @@ class SensorHTTPHandler(http.server.SimpleHTTPRequestHandler):
                     'vaga2': dict(estado_vagas_cache.get('vaga2', {})),
                 }
 
-            if cache_snapshot['timestamp']:
-                payload = cache_snapshot
-            else:
-                # Fallback: ler uma vez diretamente se o cache ainda não estiver pronto
-                d1 = medir_distancia_parking(S1_TRIGGER, S1_ECHO)
-                d2 = medir_distancia_parking(S2_TRIGGER, S2_ECHO)
-                estado1 = atualizar_atuadores(d1, LED_VAGA1_VERMELHO, LED_VAGA1_VERDE, BUZZER_VAGA1)
-                estado2 = atualizar_atuadores(d2, LED_VAGA2_VERMELHO, LED_VAGA2_VERDE, BUZZER_VAGA2)
-                prox1 = (d1 is not None) and (d1 < THRESHOLD_MUITO_PROXIMO_CM)
-                prox2 = (d2 is not None) and (d2 < THRESHOLD_MUITO_PROXIMO_CM)
-
-                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                registrar_leitura_vaga(1, d1, estado1, prox1, ts)
-                registrar_leitura_vaga(2, d2, estado2, prox2, ts)
-
-                payload = {
-                    'timestamp': ts,
-                    'vaga1': {
-                        'distancia': None if d1 is None else float(round(d1, 2)),
-                        'estado': estado1,
-                        'muito_proximo': prox1,
-                        'led_vermelho': True if (d1 is not None and d1 < THRESHOLD_OCUPADA_CM) else False,
-                        'led_verde': True if (d1 is not None and d1 >= THRESHOLD_OCUPADA_CM) else False,
-                        'buzzer': True if prox1 else False
-                    },
-                    'vaga2': {
-                        'distancia': None if d2 is None else float(round(d2, 2)),
-                        'estado': estado2,
-                        'muito_proximo': prox2,
-                        'led_vermelho': True if (d2 is not None and d2 < THRESHOLD_OCUPADA_CM) else False,
-                        'led_verde': True if (d2 is not None and d2 >= THRESHOLD_OCUPADA_CM) else False,
-                        'buzzer': True if prox2 else False
-                    }
-                }
-
-                # Atualiza o cache para futuras respostas
-                with cache_vagas_lock:
-                    estado_vagas_cache.update(payload)
-
+            # Este endpoint agora apenas lê o cache.
+            # O fallback foi removido, pois o loop principal (loop_estacionamento)
+            # é o único responsável por popular o cache.
+            payload = cache_snapshot
+            
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
@@ -934,12 +1024,12 @@ class SensorHTTPHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 import RPi.GPIO as GPIO
                 GPIO.output(LED_PIN, GPIO.HIGH if led_status else GPIO.LOW)
-                print(f"LED {'ligado' if led_status else 'desligado'}")
-            except (ImportError, NameError):
+                print(f"LED (Pino 18) {'ligado' if led_status else 'desligado'}")
+            except (ImportError, NameError, RuntimeError) as e:
                 # Em modo de simulação, apenas exibe mensagem
-                print(f"Simulação: LED {'ligado' if led_status else 'desligado'}")
+                print(f"Simulação: LED (Pino 18) {'ligado' if led_status else 'desligado'}. Erro: {e}")
             
-            # Registrar ação no histórico CSV
+            # OTIMIZAÇÃO: Esta função agora é assíncrona (muito rápida)
             registrar_acao_led(led_status)
             
             # Enviar resposta
@@ -956,22 +1046,7 @@ class SensorHTTPHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({'estado': 1 if led_status else 0}).encode())
             return
         
-        # Endpoints de download dos arquivos CSV
-        elif path == '/download/leituras':
-            if os.path.exists(ARQUIVO_LEITURAS):
-                try:
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'text/csv')
-                    self.send_header('Content-Disposition', 'attachment; filename="leituras_sensor.csv"')
-                    self.end_headers()
-                    with open(ARQUIVO_LEITURAS, 'rb') as f:
-                        self.wfile.write(f.read())
-                except Exception as e:
-                    print(f"Erro ao enviar leituras CSV: {e}")
-                    self.send_error(500, "Erro ao enviar arquivo")
-            else:
-                self.send_error(404, "Arquivo de leituras não encontrado")
-            return
+        # Endpoints de download dos arquivos CSV (sem alterações)
         elif path == '/download/leituras_vaga1.csv':
             if os.path.exists(ARQUIVO_VAGA1):
                 try:
@@ -1052,33 +1127,7 @@ class SensorHTTPHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404)
             return
 
-# Função para leitura contínua do sensor
-def ler_sensor():
-    global leituras_historico
-    
-    while True:
-        try:
-            # Obter leitura do sensor
-            distancia = sensor.medir_distancia()
-                
-            # Formatar timestamp
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            timestamp_display = datetime.now().strftime('%H:%M:%S')
-            
-            # Adicionar ao histórico em memória
-            leituras_historico.append({'timestamp': timestamp_display, 'valor': distancia})
-            
-            # Limitar tamanho do histórico em memória
-            if len(leituras_historico) > MAX_HISTORICO:
-                leituras_historico.pop(0)
-            
-            # Registrar no arquivo CSV
-            registrar_leitura(distancia, timestamp)
-                
-            time.sleep(intervalo_leitura)
-        except Exception as e:
-            print(f"Erro na leitura do sensor: {e}")
-            time.sleep(intervalo_leitura)
+# Função para leitura contínua do sensor (REMOVIDA)
 
 # Função para iniciar o servidor HTTP
 def iniciar_servidor():
@@ -1087,13 +1136,19 @@ def iniciar_servidor():
     # Inicializa os arquivos CSV
     inicializar_arquivos_csv()
     
-    # Inicia thread para leitura contínua do sensor
-    thread_sensor = threading.Thread(target=ler_sensor, daemon=True)
-    thread_sensor.start()
+    # ==========================================================
+    #     REMOVIDO: thread_sensor (causava conflito)
+    # ==========================================================
 
     # Inicia thread do loop de estacionamento (duas vagas)
     thread_parking = threading.Thread(target=loop_estacionamento, daemon=True)
     thread_parking.start()
+    
+    # ==========================================================
+    #     NOVO: Inicia thread de logging
+    # ==========================================================
+    thread_logger = threading.Thread(target=log_writer, daemon=True)
+    thread_logger.start()
     
     # Configura o servidor para aceitar conexões de qualquer endereço IP
     with socketserver.TCPServer(("0.0.0.0", PORT), handler) as httpd:
@@ -1109,7 +1164,7 @@ def iniciar_servidor():
         print("Servidor encerrado")
 
 # Função principal
-if _name_ == "_main_":
+if __name__ == "__main__":
     try:
         # Suporte a argumento de linha de comando para porta
         parser = argparse.ArgumentParser(description="Servidor Lite do monitor de estacionamento")
@@ -1118,12 +1173,13 @@ if _name_ == "_main_":
         PORT = args.port
 
         # Inicia o servidor
-        print("Iniciando servidor web simplificado...")
+        print("Iniciando servidor web simplificado (OTIMIZADO)...")
         print("VERSÃO LITE: Otimizada para menor consumo de recursos")
         iniciar_servidor()
     except KeyboardInterrupt:
         print("\nEncerrando o programa...")
     finally:
         # Limpa os recursos
+        # O `sensor.cleanup()` agora limpa TODOS os pinos GPIO
+        # usados, incluindo os do estacionamento e o LED_PIN 18.
         sensor.cleanup()
-        print("Sensor limpo e programa encerrado.")
