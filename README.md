@@ -11,6 +11,7 @@ O sistema inclui uma **interface Web** que exibe o estado das vagas e permite ac
 [https://github.com/pedrodev3005](https://github.com/pedrodev3005)
 
 [https://github.com/nicholas7821](https://github.com/nicholas7821)
+
 ---
 
 ## 🎯 **Objetivo do Projeto**
