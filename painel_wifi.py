@@ -32,7 +32,8 @@ CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 !@#$%^
 CHARSET_LEN = len(CHARSET)
 
 # --- Splash / Identidade do Projeto ---
-PROJECT_NAME = "Estacionamento Inteligente"
+PROJECT_NAME = "Estacionamento"
+PROJECT_NAME1 = "Inteligente"
 PROJECT_AUTHORS = "Pedro Augusto & Nicholas"
 SPLASH_SECONDS = 2.5  # tempo que a tela fica visível
 
@@ -223,8 +224,9 @@ def show_splash(disp, image, draw, font):
     except Exception:
         font_big = font
     # distribui as linhas verticalmente
-    y0 = 10
+    y0 = 5
     draw_centered_text(draw, font_big, PROJECT_NAME, y0)
+    draw_centered_text(draw, font_big, PROJECT_NAME1,y0 + 15)
     draw_centered_text(draw, font, "by", y0 + 18)
     draw_centered_text(draw, font, PROJECT_AUTHORS, y0 + 30)
     display_show(disp, image)
